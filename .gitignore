@@ -1,0 +1,20 @@
+# Environment (contains secrets — use .env.example for the template)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.uv/
+
+# Tests / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+
+PLAN.md
