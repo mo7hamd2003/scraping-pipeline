@@ -1,55 +1,75 @@
 from urllib.parse import urljoin, urlparse
 from pathlib import Path
-
+from bs4 import BeautifulSoup
 import requests
-import urllib.robotparser as robotparser
 
+DOMAIN_ROOT = "https://books.toscrape.com/"
 CACHE_DIR = Path("cache")
-CACHE_DIR.mkdir(exist_ok=True)
+MAX_PAGES = 3
 
-domain_root = "https://books.toscrape.com/"
-headers = {
+HEADERS = {
     "User-Agent": "FlyRankInternshipA9/1.0"
 }
 
-def robots_exit(domain_root: str) -> bool:
+
+def robots_exists(domain_root: str) -> bool:
+    """Check whether robots.txt exists at the domain root."""
     robots_url = urljoin(domain_root, "/robots.txt")
-    resp = requests.get(robots_url)
+    resp = requests.get(robots_url, headers=HEADERS, timeout=10)
     return resp.status_code == 200
 
 
-def page_200(domain_root: str) -> bool:
-    resp = requests.get(domain_root, headers=headers, timeout=10)
-    return resp.status_code == 200
-
-def save_to_cache(url: str):
-    parse = urlparse(url)
-    name = parse.path.strip("/").replace("/", "_") or "index"
+def cache_path_for(url: str) -> Path:
+    """Turn a URL into a deterministic filename under CACHE_DIR."""
+    parsed = urlparse(url)
+    name = parsed.path.strip("/").replace("/", "_") or "index"
     if not name.endswith(".html"):
         name += ".html"
-    path = CACHE_DIR / name
-    return path
+    return CACHE_DIR / name
 
 
-def fetch_cache(url: str):
-    path = save_to_cache(url)
-    if path.exists():
-        return path.read_text(encoding="utf-8")
+def crawl_catalogue(start_url: str, max_pages: int) -> None:
+    url = start_url
+    page_count = 0
+    discovered_count = 0
+    unique_links = set()
 
-    resp = requests.get(url, headers=headers, timeout=10)
-    resp.raise_for_status()
-    path.write_text(resp.text, encoding='utf-8')
-    return path
-        
-if robots_exit(domain_root):
-    print("robots.txt exist")
-else:
-    print("no robots file found")
+    while url and page_count < max_pages:
+        resp = requests.get(url, headers=HEADERS, timeout=10)
+        if resp.status_code != 200:
+            print(f"page not found: {url}")
+            break
 
-resp = urljoin(domain_root, "catalogue/tipping-the-velvet_999/index.html")
-if page_200(resp):
-    print("FETCH")
-    fetch_cache(resp)
-    print("CACHE HIT")
-else:
-    print("page not found")
+        path = cache_path_for(url)
+        path.write_text(resp.text, encoding="utf-8")
+        print(f"CACHED page {page_count + 1}: {url}")
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        for book in soup.select("article.product_pod"):
+            book_link = book.h3.a["href"]
+            page_url = urljoin(url, book_link)
+            discovered_count += 1
+            unique_links.add(page_url)
+            print(f"{discovered_count}. {page_url}")
+
+        page_count += 1
+        next_tag = soup.select_one("li.next a")
+        url = urljoin(url, next_tag["href"]) if next_tag else None
+    print(f"Catalogue_pages= {page_count}, Discovered= {discovered_count}, unique_url= {len(unique_links)}")
+
+
+def main() -> None:
+    CACHE_DIR.mkdir(exist_ok=True)
+
+    if robots_exists(DOMAIN_ROOT):
+        print("robots.txt exists")
+    else:
+        print("no robots file found")
+
+    start_url = urljoin(DOMAIN_ROOT, "catalogue/page-1.html")
+    crawl_catalogue(start_url, MAX_PAGES)
+
+
+if __name__ == "__main__":
+    main()
