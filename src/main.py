@@ -1,8 +1,10 @@
 from urllib.parse import urljoin, urlparse
 from pathlib import Path
+from pydantic import BaseModel
 from bs4 import BeautifulSoup
+from datetime import datetime
 import requests
-import time
+import json 
 
 DOMAIN_ROOT = "https://books.toscrape.com/"
 CACHE_DIR = Path("cache")
@@ -12,6 +14,16 @@ HEADERS = {
     "User-Agent": "FlyRankInternshipA9/1.0"
 }
 
+class Schema(BaseModel):
+    product_url: str
+    title: str | None
+    price: str | None
+    price_pgb: float | None
+    availability: str | None
+    rating: str | None
+    description: str | None
+    source_page: str
+    fetched_at: datetime
 
 def robots_exists(domain_root: str) -> bool:
     """Check whether robots.txt exists at the domain root."""
@@ -73,6 +85,7 @@ def fetch_product(url: str) -> dict | None:
  
     title = soup.select_one("div.product_main h1").get_text(strip=True)
     price = soup.select_one("p.price_color").get_text(strip=True)
+    numeric_price = float(price.replace("Â£", ""))
     availability = soup.select_one("p.availability").get_text(strip=True)
     rating_tag = soup.select_one("p.star-rating")
     rating = rating_tag.get("class", [])[-1] if rating_tag else ""
@@ -81,21 +94,47 @@ def fetch_product(url: str) -> dict | None:
     description = desc_tag.get_text(strip=True) if desc_tag else ""
 
     source_page = url
-    fetched_at = time.strftime("%Y-%m-%d %H:%M:%S")
+    fetched_at = datetime.now()
  
     table_rows = soup.select("table.table.table-striped tr")
     extra_info = {row.th.get_text(strip=True): row.td.get_text(strip=True) for row in table_rows}
  
     return {
-        "url": url,
+        "product_url": url,
         "title": title,
         "price": price,
+        "price_pgb": numeric_price, 
         "availability": availability,
         "rating": rating,
         "description": description,
         "source_page": source_page,
         "fetched_at": fetched_at,
     }
+
+
+def compare_and_store(info: dict) -> None:
+    """This function to compare data against the schema and store it as .json file."""
+    try:
+        validate = Schema.model_validate(info)
+
+        with open("output/books.json", "a", encoding="utf-8") as f:
+            json.dump(validate.model_dump(mode="json"), f, ensure_ascii=False)
+            f.write("\n")
+
+        print(f"VALID: {validate}")
+
+    except ValidationError as e:
+        error_record = {
+            'data': info,
+            'error': e.errors(),
+        }
+
+        with open("output/errors.json", "a", encoding="utf-8") as f:
+            json.dump(error_record, f, ensure_ascii=False, default=str)
+            f.write("\n")
+
+        print(f"INVALID: {info.get('product_url')}")
+        print(e)
 
 
 def main() -> None:
@@ -110,7 +149,8 @@ def main() -> None:
     products = crawl_catalogue(start_url, MAX_PAGES)
     for product in products:
         results = fetch_product(product)
-        print(results)
+        if results is not None:
+            compare_and_store(results)
 
 
 if __name__ == "__main__":
